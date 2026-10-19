@@ -1,0 +1,75 @@
+import Foundation
+
+@main struct StoreChecks {
+    @MainActor static func main() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TeacherChecks-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = OrganizerStore(directory: directory, notificationsEnabled: false)
+        store.load()
+        precondition(store.error == nil)
+        let client = store.workspace.clientID
+        precondition(UUID(uuidString: client) != nil)
+        let classroom = Entry(kind: .classroom, title: "Science")
+        let student = Entry(kind: .student, title: "Avery", classID: classroom.id)
+        let category = Entry(kind: .category, title: "Tests", weight: 2)
+        [classroom, student, category].forEach { precondition(store.save($0)) }
+        store.save(Entry(kind: .grade, title: "Quiz", classID: classroom.id, studentID: student.id, categoryID: category.id, score: 90))
+        store.save(Entry(kind: .grade, title: "Reflection", classID: classroom.id, studentID: student.id, score: 60))
+        precondition(store.average(studentID: student.id) == 80)
+        store.mark(student, on: Date(), as: .present)
+        store.mark(student, on: Date(), as: .late)
+        precondition(store.workspace.attendance.count == 1)
+        precondition(store.attendance(student.id, on: Date()) == .late)
+        let reopened = OrganizerStore(directory: directory, notificationsEnabled: false)
+        reopened.load()
+        precondition(reopened.workspace.clientID == client)
+        precondition(reopened.workspace.entries.count == 5)
+        precondition(reopened.workspace.attendance.count == 1)
+        let sourceFile = directory.appendingPathComponent("sample.txt")
+        try Data("A local teaching resource".utf8).write(to: sourceFile)
+        var material = Entry(kind: .material, title: "Handout")
+        try store.importFile(sourceFile, for: &material)
+        store.save(material)
+        let backupFile = try store.exportBackup()
+        let restoreDir = directory.appendingPathComponent("Restored")
+        let restored = OrganizerStore(directory: restoreDir, notificationsEnabled: false)
+        restored.load()
+        let newClient = restored.workspace.clientID
+        try restored.restore(backupFile)
+        precondition(restored.workspace.entries.count == 6)
+        precondition(restored.workspace.clientID == newClient && newClient != client)
+        let restoredMaterial = restored.entry(material.id)!
+        let restoredFileName = restoredMaterial.fileName!
+        let restoredFile = try Data(contentsOf: restoreDir.appendingPathComponent(restoredFileName))
+        precondition(restoredFile == Data("A local teaching resource".utf8))
+        restored.archive(classroom)
+        precondition(restored.items(.classroom).isEmpty && restored.items(.classroom, archived: true).count == 1)
+        restored.archive(restored.entry(classroom.id)!)
+        precondition(restored.items(.classroom).count == 1)
+        restored.delete(student)
+        precondition(restored.workspace.attendance.isEmpty)
+        precondition(restored.items(.grade).allSatisfy { $0.studentID == nil })
+        restored.delete(restoredMaterial)
+        precondition(!FileManager.default.fileExists(atPath: restoreDir.appendingPathComponent(restoredFileName).path))
+        let corrupt = Backup(workspace: Workspace(entries: [Entry(kind: .material, title: "Unsafe", fileName: "../outside.txt")]), files: ["../outside.txt": Data()])
+        let unsafe = directory.appendingPathComponent("unsafe.teacherbackup")
+        try JSONEncoder().encode(corrupt).write(to: unsafe)
+        let originalCount = restored.workspace.entries.count
+        do { try restored.restore(unsafe); preconditionFailure("Unsafe backup accepted") } catch { }
+        precondition(restored.workspace.entries.count == originalCount)
+        restored.reset()
+        precondition(restored.workspace.entries.isEmpty && restored.workspace.clientID == newClient)
+        let damagedDirectory = directory.appendingPathComponent("Damaged")
+        try FileManager.default.createDirectory(at: damagedDirectory, withIntermediateDirectories: true)
+        let damagedURL = damagedDirectory.appendingPathComponent("workspace.json")
+        let damagedData = Data("unreadable workspace".utf8)
+        try damagedData.write(to: damagedURL)
+        let damaged = OrganizerStore(directory: damagedDirectory, notificationsEnabled: false)
+        damaged.load()
+        precondition(damaged.loadFailed)
+        damaged.save(Entry(kind: .task, title: "Should not overwrite"))
+        let preservedData = try Data(contentsOf: damagedURL)
+        precondition(preservedData == damagedData)
+        print("PASS: UUID generation, persistence, weighted grades, daily attendance upsert, self-contained backup/restore, archive, relation cleanup, attachment cleanup, invalid backup rejection, reset and damaged-file protection")
+    }
+}
