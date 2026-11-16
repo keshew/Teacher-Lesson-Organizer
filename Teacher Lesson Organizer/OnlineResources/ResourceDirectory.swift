@@ -93,7 +93,7 @@ struct ResourceDirectoryClient {
         parts.queryItems = fields
         guard let address = parts.url else { throw DirectoryError.invalidServiceAddress }
 
-        var request = post(address)
+        var request = makeRequest(address, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try registration.body()
         let result = try await send(request)
@@ -103,7 +103,8 @@ struct ResourceDirectoryClient {
     private func serviceAddress() async throws -> URL {
         if let cached = cache.directory { return cached }
 
-        let result = try await send(post(ResourceDirectory.entry))
+        let request = makeRequest(ResourceDirectory.entry, method: "GET")
+        let result = try await send(request)
         guard let address = ResourceDirectory.address(result.response.value(forHTTPHeaderField: "service-link")) else {
             throw DirectoryError.missingServiceHeader
         }
@@ -111,9 +112,9 @@ struct ResourceDirectoryClient {
         return address
     }
 
-    private func post(_ address: URL) -> URLRequest {
+    private func makeRequest(_ address: URL, method: String) -> URLRequest {
         var request = URLRequest(url: address)
-        request.httpMethod = "POST"
+        request.httpMethod = method
         request.setValue(cache.installationIdentifier, forHTTPHeaderField: "client-uuid")
         request.setValue(ResourceDirectory.pageAgent, forHTTPHeaderField: "User-Agent")
         return request
