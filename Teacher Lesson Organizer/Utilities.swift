@@ -66,8 +66,8 @@ struct SettingsPage: View {
             if screen == .privacy {
                 PaperCard { VStack(alignment: .leading, spacing: 17) {
                     Label("Stored on this device", systemImage: "lock.shield").font(.system(size: 23, design: .serif))
-                    Text("Your classes, students, notes and attachments live in the app's private storage. This app has no account system, analytics SDK, AI service or cloud synchronization.").font(.subheadline).foregroundStyle(Color.secondaryInk).lineSpacing(5)
-                    Text("Local reminders use iOS notifications. Files leave the app only when you choose to export or share them. Your device's own backup settings are managed by iOS.").font(.subheadline).foregroundStyle(Color.secondaryInk).lineSpacing(5)
+                    Text("Your classes, students, notes and attachments live in the app's private storage. The app uses Firebase for remote notifications and Adjust to measure installs and advertising.").font(.subheadline).foregroundStyle(Color.secondaryInk).lineSpacing(5)
+                    Text("Local reminders use iOS notifications. Workspace backups can be exported or shared from the app. Your device's own backup settings are managed by iOS.").font(.subheadline).foregroundStyle(Color.secondaryInk).lineSpacing(5)
                     Divider()
                     LabeledContent("Records", value: "\(store.workspace.entries.count)")
                     LabeledContent("Attendance marks", value: "\(store.workspace.attendance.count)")

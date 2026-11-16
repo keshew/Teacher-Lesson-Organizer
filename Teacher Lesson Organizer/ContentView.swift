@@ -20,7 +20,7 @@ enum Screen: String, CaseIterable, Identifiable {
     }
 }
 struct ContentView: View {
-    @StateObject private var store = OrganizerStore()
+    @ObservedObject var store: OrganizerStore
     @AppStorage("onboardingComplete") private var onboarded = false
     @State private var loading = true
     @State private var incomingBackupPrompt = false
@@ -38,8 +38,7 @@ struct ContentView: View {
             try? await Task.sleep(for: .milliseconds(750))
             withAnimation(.easeInOut(duration: 0.4)) { loading = false }
         }
-        .onOpenURL { store.receiveBackup($0) }
-        .onChange(of: store.incomingBackupURL) { _, url in incomingBackupPrompt = url != nil }
+        .onChange(of: store.incomingBackupURL, initial: true) { _, url in incomingBackupPrompt = url != nil }
         .confirmationDialog("Restore this backup? This replaces the current workspace.", isPresented: $incomingBackupPrompt, titleVisibility: .visible) {
             Button("Restore backup", role: .destructive) {
                 guard let url = store.incomingBackupURL else { return }

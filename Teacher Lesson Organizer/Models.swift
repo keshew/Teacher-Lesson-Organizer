@@ -99,10 +99,10 @@ enum OrganizerFailure: LocalizedError {
     static let maximumBackupBytes = 150 * 1024 * 1024
     var dataURL: URL { directory.appendingPathComponent("workspace.json") }
 
-    init(directory customDirectory: URL? = nil, notificationsEnabled: Bool = true) {
+    init(directory customDirectory: URL? = nil, notificationsEnabled: Bool = true, installsNotificationDelegate: Bool = true) {
         self.notificationsEnabled = notificationsEnabled
         directory = customDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("TeacherLessonOrganizer", isDirectory: true)
-        if notificationsEnabled {
+        if notificationsEnabled, installsNotificationDelegate {
             notificationBridge = ReminderNotificationBridge { [weak self] id in self?.reminderRoute = id }
             UNUserNotificationCenter.current().delegate = notificationBridge
         }
