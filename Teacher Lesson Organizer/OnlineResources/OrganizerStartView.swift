@@ -7,24 +7,28 @@ struct OrganizerStartView: View {
     @StateObject private var startup = OrganizerStartup()
     @State private var showsOrganizer = false
     @State private var selectedGame: ArcadeGame?
+    @State private var loadedPage: URL?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        let webContentIsReady = isPageVisible
         Group {
             if startup.showsLaunchScreen {
                 LaunchScreen()
             } else if showsOrganizer {
                 ContentView(store: store)
                     .safeAreaInset(edge: .top, spacing: 0) {
-                        Button {
-                            showsOrganizer = false
-                        } label: {
-                            Label("Games", systemImage: "chevron.left")
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 20)
+                        if store.ready {
+                            Button {
+                                showsOrganizer = false
+                            } label: {
+                                Label("Games", systemImage: "chevron.left")
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .padding(.horizontal, 20)
+                            }
+                            .buttonStyle(.plain)
+                            .background(.regularMaterial)
                         }
-                        .buttonStyle(.plain)
-                        .background(.regularMaterial)
                     }
             } else {
                 ArcadeLobby(openOrganizer: openOrganizer, selected: $selectedGame)
@@ -56,23 +60,47 @@ struct OrganizerStartView: View {
             openOrganizer()
             store.receiveBackup(url)
         }
-        .fullScreenCover(isPresented: Binding(get: { startup.page != nil && selectedGame == nil }, set: { _ in })) {
-            ResourcePageView(address: Binding(get: { startup.page }, set: { _ in }))
+        .fullScreenCover(isPresented: Binding(get: { startup.page != nil && selectedGame == nil }, set: { _ in }), onDismiss: { loadedPage = nil }) {
+            ResourcePageView(address: startup.page, didLoad: { loadedPage = $0 })
                 .ignoresSafeArea()
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    Button {
-                        startup.openWorkspace()
-                        showsOrganizer = false
-                    } label: {
-                        Label("Games", systemImage: "chevron.left")
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, 20)
+                    if webContentIsReady {
+                        Button {
+                            startup.openWorkspace()
+                            showsOrganizer = false
+                        } label: {
+                            Label("Games", systemImage: "chevron.left")
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 20)
+                        }
+                        .buttonStyle(.plain)
+                        .background(.regularMaterial)
                     }
-                    .buttonStyle(.plain)
-                    .background(.regularMaterial)
+                }
+                .accessibilityHidden(!webContentIsReady)
+                .overlay {
+                    if !webContentIsReady {
+                        LaunchScreen(title: "Opening page…")
+                    }
                 }
                 .interactiveDismissDisabled()
+                .task(id: startup.page) {
+                    guard let requested = startup.page, !isPageVisible else { return }
+                    do {
+                        try await Task.sleep(for: .seconds(25))
+                        if startup.page == requested, !isPageVisible {
+                            startup.dismissUnavailablePage(requested)
+                        }
+                    } catch {
+                        return
+                    }
+                }
         }
+    }
+
+    private var isPageVisible: Bool {
+        guard let requested = startup.page else { return false }
+        return loadedPage == requested
     }
 
     private func openOrganizer() {

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23094" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="start-controller">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="23084"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="start-scene">
+            <objects>
+                <viewController id="start-controller" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="start-view">
+                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                        <subviews>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="Starting…" textAlignment="center" translatesAutoresizingMaskIntoConstraints="NO" id="start-label">
+                                <rect key="frame" x="144" y="413" width="105" height="26"/>
+                                <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="22"/>
+                                <color key="textColor" red="0.12" green="0.15" blue="0.18" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                            </label>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="start-safe"/>
+                        <color key="backgroundColor" red="0.97" green="0.97" blue="0.965" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <constraints>
+                            <constraint firstItem="start-label" firstAttribute="centerX" secondItem="start-view" secondAttribute="centerX" id="label-x"/>
+                            <constraint firstItem="start-label" firstAttribute="centerY" secondItem="start-view" secondAttribute="centerY" id="label-y"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="start-first" sceneMemberID="firstResponder"/>
+            </objects>
+        </scene>
+    </scenes>
+</document>

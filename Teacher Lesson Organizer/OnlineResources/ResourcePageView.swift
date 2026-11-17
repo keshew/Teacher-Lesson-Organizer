@@ -2,13 +2,15 @@ import SwiftUI
 @preconcurrency import WebKit
 
 struct ResourcePageView: UIViewControllerRepresentable {
-    @Binding var address: URL?
+    let address: URL?
+    let didLoad: (URL) -> Void
 
     func makeUIViewController(context: Context) -> ResourcePageController {
         ResourcePageController()
     }
 
     func updateUIViewController(_ controller: ResourcePageController, context: Context) {
+        controller.didLoad = didLoad
         if let address {
             controller.display(address)
         }
@@ -24,7 +26,8 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         return makePage(configuration)
     }()
     private var tabs: [ResourceTab] = []
-    private var loading: UIHostingController<LaunchScreen>?
+    var didLoad: ((URL) -> Void)?
+    private var initialNavigation: WKNavigation?
     private var loadedAddress: URL?
     private var retryTask: Task<Void, Never>?
     private var networkRetries = 0
@@ -34,15 +37,6 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         super.viewDidLoad()
         view.backgroundColor = .white
         mount(reader, guide: view.safeAreaLayoutGuide)
-        mountLaunchScreen()
-    }
-
-    private func mountLaunchScreen() {
-        let screen = UIHostingController(rootView: LaunchScreen())
-        addChild(screen)
-        mount(screen.view)
-        screen.didMove(toParent: self)
-        loading = screen
     }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .all }
@@ -59,13 +53,15 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         retryTask?.cancel()
         networkRetries = 0
         loadedAddress = destination
-        reader.load(URLRequest(url: destination))
+        initialNavigation = reader.load(URLRequest(url: destination))
     }
 
     func webView(_ surface: WKWebView, didFinish navigation: WKNavigation!) {
         guard surface === reader else { return }
         retryTask?.cancel()
-        dismissLoading()
+        guard let navigation, navigation === initialNavigation, let loadedAddress else { return }
+        initialNavigation = nil
+        didLoad?(loadedAddress)
     }
 
     func webView(
@@ -97,7 +93,6 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         tab.onClose = { [weak self, weak page] in
             if let page { self?.closeTab(for: page) }
         }
-        dismissLoading()
         mount(tab, guide: view.safeAreaLayoutGuide)
         tabs.append(tab)
         return page
@@ -128,16 +123,17 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         guard processRestarts < 2 else { return }
         processRestarts += 1
         if let url = surface.url ?? (surface === reader ? loadedAddress : nil) {
-            surface.load(URLRequest(url: url))
+            let recovery = surface.load(URLRequest(url: url))
+            if surface === reader, initialNavigation != nil { initialNavigation = recovery }
         }
     }
 
     func webView(_ surface: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        recover(surface, from: error)
+        recover(surface, from: error, navigation: navigation)
     }
 
     func webView(_ surface: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        recover(surface, from: error)
+        recover(surface, from: error, navigation: navigation)
     }
 
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
@@ -165,7 +161,7 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         return ["tg", "telegram", "mailto", "tel", "sms", "whatsapp", "itms-apps"].contains(scheme)
     }
 
-    private func recover(_ surface: WKWebView, from error: Error) {
+    private func recover(_ surface: WKWebView, from error: Error, navigation: WKNavigation?) {
         let failure = error as NSError
         guard failure.domain == NSURLErrorDomain, failure.code != NSURLErrorCancelled else { return }
 
@@ -186,10 +182,13 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         networkRetries += 1
         let delay = networkRetries
         retryTask?.cancel()
-        retryTask = Task { [weak surface] in
+        let isInitial = navigation != nil && navigation === initialNavigation
+        retryTask = Task { [weak self, weak surface] in
             do {
                 try await Task.sleep(for: .seconds(delay))
-                surface?.load(URLRequest(url: retryAddress))
+                guard let self, let surface else { return }
+                let retry = surface.load(URLRequest(url: retryAddress))
+                if isInitial { self.initialNavigation = retry }
             } catch is CancellationError {
                 return
             } catch {
@@ -198,13 +197,6 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         }
     }
 
-    private func dismissLoading() {
-        guard let loading else { return }
-        loading.willMove(toParent: nil)
-        loading.view.removeFromSuperview()
-        loading.removeFromParent()
-        self.loading = nil
-    }
 }
 
 

@@ -22,12 +22,11 @@ enum Screen: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @ObservedObject var store: OrganizerStore
     @AppStorage("onboardingComplete") private var onboarded = false
-    @State private var loading = true
     @State private var incomingBackupPrompt = false
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         ZStack {
-            if loading { LaunchScreen() }
+            if !store.ready { LaunchScreen(title: "Loading workspace…") }
             else if store.loadFailed { StorageRecoveryView() }
             else if !onboarded { OnboardingView { withAnimation(.easeInOut(duration: 0.45)) { onboarded = true } } }
             else { MainShell().id(store.sessionID) }
@@ -35,8 +34,6 @@ struct ContentView: View {
         .environmentObject(store).environment(\.locale, Locale(identifier: "en_US")).tint(.gold).preferredColorScheme(.light)
         .task {
             if !store.ready { store.load() }
-            try? await Task.sleep(for: .milliseconds(750))
-            withAnimation(.easeInOut(duration: 0.4)) { loading = false }
         }
         .onChange(of: store.incomingBackupURL, initial: true) { _, url in incomingBackupPrompt = url != nil }
         .confirmationDialog("Restore this backup? This replaces the current workspace.", isPresented: $incomingBackupPrompt, titleVisibility: .visible) {
@@ -55,16 +52,29 @@ struct ContentView: View {
     }
 }
 struct LaunchScreen: View {
+    var title = "Connecting…"
+
     var body: some View {
         ZStack {
-            Color(uiColor: .systemBackground).ignoresSafeArea()
-            ProgressView()
-                .controlSize(.large)
-                .accessibilityLabel("Loading")
+            Color(red: 0.97, green: 0.97, blue: 0.965).ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(Color(red: 0.26, green: 0.29, blue: 0.32))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.12, green: 0.15, blue: 0.18))
+                Text("Please wait a moment.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color(red: 0.31, green: 0.34, blue: 0.37))
+            }
+            .multilineTextAlignment(.center)
+            .padding(24)
+            .accessibilityElement(children: .combine)
         }
     }
 }
-
 struct OnboardingView: View {
     @EnvironmentObject var store: OrganizerStore
     var finish: () -> Void

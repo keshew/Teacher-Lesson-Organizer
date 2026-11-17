@@ -46,6 +46,11 @@ final class OrganizerStartup: ObservableObject {
         updateResources()
     }
 
+    func dismissUnavailablePage(_ address: URL) {
+        guard page == address else { return }
+        showWorkspace()
+    }
+
     func openWorkspace() {
         workspaceRequested = true
         showWorkspace()
