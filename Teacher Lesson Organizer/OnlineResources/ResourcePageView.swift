@@ -19,9 +19,11 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
     private lazy var reader: WKWebView = {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         return makePage(configuration)
     }()
-    private var overlays: [WKWebView] = []
+    private var tabs: [ResourceTab] = []
     private var loading: UIHostingController<LaunchScreen>?
     private var loadedAddress: URL?
     private var retryTask: Task<Void, Never>?
@@ -89,16 +91,37 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
             UIApplication.shared.open(url)
             return nil
         }
-        let popup = makePage(configuration)
-        mount(popup)
-        overlays.append(popup)
-        return popup
+        // WebKit loads the request into this view and keeps the opener relationship.
+        let page = makePage(configuration)
+        let tab = ResourceTab(page: page)
+        tab.onClose = { [weak self, weak page] in
+            if let page { self?.closeTab(for: page) }
+        }
+        dismissLoading()
+        mount(tab, guide: view.safeAreaLayoutGuide)
+        tabs.append(tab)
+        return page
     }
 
     func webViewDidClose(_ surface: WKWebView) {
-        guard surface !== reader else { return }
-        surface.removeFromSuperview()
-        overlays.removeAll { $0 === surface }
+        closeTab(for: surface)
+    }
+
+    func webView(
+        _ surface: WKWebView,
+        requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        type: WKMediaCaptureType,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        decisionHandler(.prompt)
+    }
+
+    private func closeTab(for surface: WKWebView) {
+        guard let index = tabs.firstIndex(where: { $0.page === surface }) else { return }
+        let tab = tabs.remove(at: index)
+        tab.removeFromSuperview()
+        surface.stopLoading()
     }
 
     func webViewWebContentProcessDidTerminate(_ surface: WKWebView) {
@@ -118,9 +141,6 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-
         let page = WKWebView(frame: .zero, configuration: configuration)
         page.customUserAgent = ResourceDirectory.pageAgent
         page.navigationDelegate = self
@@ -185,4 +205,45 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         loading.removeFromParent()
         self.loading = nil
     }
+}
+
+
+private final class ResourceTab: UIView {
+    let page: WKWebView
+    var onClose: (() -> Void)?
+
+    init(page: WKWebView) {
+        self.page = page
+        super.init(frame: .zero)
+        backgroundColor = .systemBackground
+
+        let close = UIButton(type: .close)
+        close.accessibilityLabel = "Close tab"
+        close.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
+
+        let toolbar = UIView()
+        toolbar.backgroundColor = .secondarySystemBackground
+        addSubview(toolbar)
+        toolbar.addSubview(close)
+        addSubview(page)
+
+        for child in [toolbar, close, page] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: 44),
+            close.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            close.trailingAnchor.constraint(equalTo: toolbar.layoutMarginsGuide.trailingAnchor),
+            page.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: trailingAnchor),
+            page.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
 }

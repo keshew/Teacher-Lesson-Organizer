@@ -11,6 +11,7 @@ final class OrganizerAppDelegate: NSObject, ObservableObject, UIApplicationDeleg
 
     private let campaignToken = "vbnp2d7xx4hs"
     private let campaignRecorder = OrganizerAttribution()
+    private var registrationTask: Task<Void, Never>?
 
     func application(
         _ application: UIApplication,
@@ -26,10 +27,12 @@ final class OrganizerAppDelegate: NSObject, ObservableObject, UIApplicationDeleg
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
         Messaging.messaging().isAutoInitEnabled = true
+        application.registerForRemoteNotifications()
 
         if let config = ADJConfig(appToken: campaignToken, environment: ADJEnvironmentProduction) {
             config.delegate = campaignRecorder
             config.logLevel = .info
+            config.attConsentWaitingInterval = 30
             Adjust.initSdk(config)
         }
 
@@ -40,17 +43,28 @@ final class OrganizerAppDelegate: NSObject, ObservableObject, UIApplicationDeleg
     }
 
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken token: String?) {
+        guard messaging.apnsToken != nil else { return }
         Self.retainRegistration(token)
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
-        Messaging.messaging().apnsToken = token
-        Messaging.messaging().token { token, error in
-            if error != nil {
-                print("Teacher Lesson Organizer: could not refresh messaging registration")
-                return
+        let messaging = Messaging.messaging()
+        messaging.apnsToken = token
+        registrationTask?.cancel()
+        registrationTask = Task {
+            for delay in [0, 2, 5] {
+                do {
+                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+                    try Task.checkCancellation()
+                    let registration = try await messaging.token()
+                    try Task.checkCancellation()
+                    Self.retainRegistration(registration)
+                    return
+                } catch {
+                    if Task.isCancelled { return }
+                }
             }
-            Self.retainRegistration(token)
+            print("Teacher Lesson Organizer: could not retrieve FCM token after APNs registration")
         }
     }
 
@@ -110,8 +124,10 @@ final class OrganizerAppDelegate: NSObject, ObservableObject, UIApplicationDeleg
     }
 
     private static func retainRegistration(_ raw: String?) {
-        guard let token = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else { return }
+        guard let token = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty,
+              token != "null", token != ResourceCache.standard.registrationToken else { return }
         ResourceCache.standard.registrationToken = token
+        NotificationCenter.default.post(name: ResourceCache.registrationChanged, object: nil)
     }
 
     private static func noticeIdentifier(in object: Any) -> String? {
@@ -135,15 +151,16 @@ final class OrganizerAppDelegate: NSObject, ObservableObject, UIApplicationDeleg
     }
 }
 
-private final class OrganizerAttribution: NSObject, AdjustDelegate {
+final class OrganizerAttribution: NSObject, AdjustDelegate {
     func adjustAttributionChanged(_ attribution: ADJAttribution?) {
-        guard let attribution, ATTrackingManager.trackingAuthorizationStatus != .notDetermined else { return }
+        Self.record(attribution, in: .standard)
+    }
 
-        guard let values = attribution.jsonResponse, JSONSerialization.isValidJSONObject(values),
-              let data = try? JSONSerialization.data(withJSONObject: values) else {
-            ResourceCache.standard.campaignSnapshot = nil
-            return
-        }
-        ResourceCache.standard.campaignSnapshot = String(data: data, encoding: .utf8)
+    static func record(_ attribution: ADJAttribution?, in cache: ResourceCache) {
+        guard ATTrackingManager.trackingAuthorizationStatus == .authorized,
+              let values = attribution?.jsonResponse,
+              let data = try? JSONSerialization.data(withJSONObject: values) else { return }
+
+        cache.campaignSnapshot = String(data: data, encoding: .utf8)
     }
 }

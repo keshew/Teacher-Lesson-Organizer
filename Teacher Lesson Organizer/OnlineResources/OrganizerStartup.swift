@@ -2,6 +2,7 @@ import AdjustSdk
 import AdSupport
 import AppTrackingTransparency
 import Combine
+import OSLog
 import UIKit
 import UserNotifications
 
@@ -16,8 +17,12 @@ final class OrganizerStartup: ObservableObject {
     @Published private(set) var hasOpenedWorkspace = false
 
     private let cache = ResourceCache.standard
-    private var started = false
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TeacherLessonOrganizer", category: "Resources")
+    private var schedule = ResourceRefreshSchedule()
+    private var presentedInitialPage = false
     private var directoryTask: Task<Void, Never>?
+    private var launchDisplayTimeout: Task<Void, Never>?
+    private var preparedPermissions = false
     private var workspaceRequested = false
 
     var page: URL? {
@@ -25,12 +30,22 @@ final class OrganizerStartup: ObservableObject {
         return nil
     }
 
-    func start() {
-        guard !started else { return }
-        started = true
-        if !workspaceRequested, !cache.hasQueuedNotice, let saved = cache.lastPage {
-            screen = .resource(saved)
+    func enterForeground() {
+        if !presentedInitialPage {
+            presentedInitialPage = true
+            if !workspaceRequested, !cache.hasQueuedNotice, let saved = cache.lastPage {
+                screen = .resource(saved)
+            }
         }
+        schedule.enterForeground()
+        updateResources()
+    }
+
+    func enterBackground() {
+        schedule.enterBackground()
+    }
+
+    func registrationChanged() {
         updateResources()
     }
 
@@ -44,26 +59,61 @@ final class OrganizerStartup: ObservableObject {
         updateResources()
     }
 
+    private var hasPendingRequest: Bool {
+        schedule.hasWork(token: cache.registrationToken, hasNotification: cache.hasQueuedNotice)
+    }
+
     private func updateResources() {
-        guard directoryTask == nil else { return }
+        guard directoryTask == nil, schedule.isForeground,
+              !preparedPermissions || hasPendingRequest else { return }
         directoryTask = Task {
-            repeat {
-                await refreshPage()
-            } while cache.hasQueuedNotice
+            let registration = ResourceRegistration(cache: cache)
+            if !preparedPermissions {
+                await registration.preparePermissions()
+                preparedPermissions = true
+                startDisplayTimeoutIfNeeded()
+            }
+            while hasPendingRequest {
+                guard let request = await registration.prepareRequest() else { break }
+                launchDisplayTimeout?.cancel()
+                launchDisplayTimeout = nil
+                let opensPage = schedule.beginRequest(
+                    token: request.registrationToken, openedFromNotification: request.notice != nil
+                )
+                await refreshPage(with: request, opensPage: opensPage)
+            }
             directoryTask = nil
         }
     }
 
-    private func refreshPage() async {
-        let request = await ResourceRegistration(cache: cache).prepareRequest()
+    private func startDisplayTimeoutIfNeeded() {
+        guard cache.registrationToken == nil, page == nil, !hasOpenedWorkspace else { return }
+        launchDisplayTimeout = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(15))
+            } catch {
+                return
+            }
+            guard let self, self.cache.registrationToken == nil, self.page == nil else { return }
+            Self.logger.notice("Still waiting for FCM registration; the resource request remains pending")
+            self.showWorkspace()
+        }
+    }
+
+    private func refreshPage(with request: ResourceRequest, opensPage: Bool) async {
+        Self.logger.info("Sending resource request with FCM token; launch or push: \(opensPage)")
         do {
-            if let destination = try await ResourceDirectoryClient(cache: cache).destination(for: request) {
-                cache.lastPage = destination
-                if !workspaceRequested { screen = .resource(destination) }
+            let destination = try await ResourceDirectoryClient(cache: cache).destination(for: request)
+            Self.logger.info("Resource response received; has destination: \(destination != nil)")
+            if let destination {
+                if opensPage || page == nil {
+                    cache.lastPage = destination
+                    if !workspaceRequested { screen = .resource(destination) }
+                }
                 return
             }
         } catch {
-            print("Teacher Lesson Organizer: could not resolve destination")
+            Self.logger.error("Resource request failed: \(String(describing: error), privacy: .private)")
         }
 
         guard !workspaceRequested, page == nil else { return }
@@ -83,32 +133,38 @@ final class OrganizerStartup: ObservableObject {
 private struct ResourceRegistration {
     let cache: ResourceCache
 
-    func prepareRequest() async -> ResourceRequest {
+    func preparePermissions() async {
+        await requestTrackingIfActive()
+
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         if settings.authorizationStatus == .notDetermined {
             _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
         }
-        UIApplication.shared.registerForRemoteNotifications()
+        if !UIApplication.shared.isRegisteredForRemoteNotifications {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+    }
 
-        try? await Task.sleep(for: .milliseconds(500))
-        await requestTrackingIfActive()
-        await waitForRegistration()
-
-        let notice = cache.takeNotice()
-        let campaign = cache.campaignParameters
-        let registration = cache.registrationToken ?? "null"
-        let attribution = await Adjust.adid(withTimeout: 1_000) ?? ""
-        let advertising = ATTrackingManager.trackingAuthorizationStatus == .authorized
-            ? ASIdentifierManager.shared().advertisingIdentifier.uuidString : ""
+    func prepareRequest() async -> ResourceRequest? {
+        let allowsTracking = ATTrackingManager.trackingAuthorizationStatus == .authorized
+        if allowsTracking {
+            let current = await Adjust.attribution(withTimeout: 1_000)
+            OrganizerAttribution.record(current, in: cache)
+        } else {
+            cache.campaignSnapshot = nil
+        }
+        let attribution = allowsTracking ? await Adjust.adid(withTimeout: 1_000) ?? "" : ""
+        let advertising = allowsTracking ? ASIdentifierManager.shared().advertisingIdentifier.uuidString : ""
+        guard let token = cache.registrationToken else { return nil }
 
         return ResourceRequest(
-            campaign: campaign,
-            registrationToken: registration,
+            campaign: allowsTracking ? cache.campaignParameters : [:],
+            registrationToken: token,
             attributionID: attribution,
             advertisingID: advertising,
             hardware: UIDevice.current.model,
-            notice: notice
+            notice: cache.takeNotice()
         )
     }
 
@@ -123,10 +179,4 @@ private struct ResourceRegistration {
         }
     }
 
-    private func waitForRegistration() async {
-        for _ in 0..<15 {
-            if cache.campaignSnapshot != nil, cache.registrationToken != nil { return }
-            try? await Task.sleep(for: .seconds(1))
-        }
-    }
 }

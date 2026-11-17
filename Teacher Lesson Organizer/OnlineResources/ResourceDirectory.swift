@@ -47,6 +47,7 @@ struct ResourceRequest {
 
 private struct ResourceReply: Decodable {
     let sessionID: String?
+    let clientID: String?
     let response: String?
 
     var destination: URL? {
@@ -63,6 +64,7 @@ private struct ResourceReply: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
+        case clientID = "client_id"
         case response
     }
 }
@@ -89,7 +91,7 @@ struct ResourceDirectoryClient {
         }
 
         var fields = (parts.queryItems ?? []).filter { !Self.routeFields.contains($0.name) }
-        fields.append(contentsOf: registration.query(clientIdentifier: cache.clientIdentifier))
+        fields.append(contentsOf: registration.query(clientIdentifier: cache.sessionClientIdentifier))
         parts.queryItems = fields
         guard let address = parts.url else { throw DirectoryError.invalidServiceAddress }
 
@@ -97,7 +99,9 @@ struct ResourceDirectoryClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try registration.body()
         let result = try await send(request)
-        return try JSONDecoder().decode(ResourceReply.self, from: result.data).destination
+        let reply = try JSONDecoder().decode(ResourceReply.self, from: result.data)
+        cache.recordClientIdentifier(reply.clientID)
+        return reply.destination
     }
 
     private func serviceAddress() async throws -> URL {

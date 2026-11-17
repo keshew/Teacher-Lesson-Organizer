@@ -8,8 +8,10 @@ final class ResourceCache {
     static let standard = ResourceCache(defaults: .standard)
     static let noticeSelected = Notification.Name("teacherLessonOrganizer.resources.noticeSelected")
 
+    static let registrationChanged = Notification.Name("teacherLessonOrganizer.resources.registrationChanged")
+
     private enum Field: String {
-        case installation, client, directory, page, registration, messagingProject, campaign, queuedNotice
+        case installation, client, serverClient, directory, page, registration, messagingProject, campaign, queuedNotice
 
         var key: String { "teacherLessonOrganizer.resources." + rawValue }
     }
@@ -23,6 +25,16 @@ final class ResourceCache {
     lazy private(set) var installationIdentifier = identifier(in: .installation)
     lazy private(set) var clientIdentifier = identifier(in: .client)
 
+    var sessionClientIdentifier: String {
+        self[.serverClient] ?? clientIdentifier
+    }
+
+    func recordClientIdentifier(_ value: String?) {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              UUID(uuidString: value) != nil else { return }
+        self[.serverClient] = value
+    }
+
     var directory: URL? {
         get { ResourceDirectory.address(self[.directory]) }
         set { self[.directory] = newValue?.absoluteString }
@@ -34,7 +46,10 @@ final class ResourceCache {
     }
 
     var registrationToken: String? {
-        get { self[.registration] }
+        get {
+            guard let token = self[.registration], !token.isEmpty, token != "null" else { return nil }
+            return token
+        }
         set { self[.registration] = newValue }
     }
 
@@ -49,14 +64,17 @@ final class ResourceCache {
         guard let snapshot = campaignSnapshot,
               let values = try? JSONSerialization.jsonObject(with: Data(snapshot.utf8)) as? [String: Any] else { return [:] }
 
-        let fields = ["trackerToken", "trackerName", "network", "campaign", "adgroup", "creative",
-                      "clickLabel", "costType", "costCurrency"]
+        let fields = [
+            "trackerToken": "tracker_token", "trackerName": "tracker_name", "network": "network",
+            "campaign": "campaign", "adgroup": "adgroup", "creative": "creative",
+            "clickLabel": "click_label", "costType": "cost_type", "costCurrency": "cost_currency"
+        ]
         var campaign: [String: Any] = [
-            "costAmount": values["costAmount"] as? Double ?? 0,
+            "costAmount": values["cost_amount"] as? Double ?? values["costAmount"] as? Double ?? 0,
             "jsonResponse": snapshot
         ]
-        for field in fields {
-            campaign[field] = values[field] as? String ?? ""
+        for (field, rawKey) in fields {
+            campaign[field] = values[rawKey] as? String ?? values[field] as? String ?? ""
         }
         return campaign
     }
