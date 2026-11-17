@@ -117,7 +117,7 @@ struct ResourceDirectoryClient {
     }
 
     private func makeRequest(_ address: URL, method: String) -> URLRequest {
-        var request = URLRequest(url: address)
+        var request = URLRequest(url: address, timeoutInterval: 15)
         request.httpMethod = method
         request.setValue(cache.installationIdentifier, forHTTPHeaderField: "client-uuid")
         request.setValue(ResourceDirectory.pageAgent, forHTTPHeaderField: "User-Agent")

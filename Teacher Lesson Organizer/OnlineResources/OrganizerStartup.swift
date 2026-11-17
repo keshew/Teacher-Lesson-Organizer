@@ -14,16 +14,19 @@ final class OrganizerStartup: ObservableObject {
     }
 
     @Published private var screen = Screen.loading
-    @Published private(set) var hasOpenedWorkspace = false
 
     private let cache = ResourceCache.standard
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TeacherLessonOrganizer", category: "Resources")
     private var schedule = ResourceRefreshSchedule()
-    private var presentedInitialPage = false
     private var directoryTask: Task<Void, Never>?
     private var launchDisplayTimeout: Task<Void, Never>?
     private var preparedPermissions = false
     private var workspaceRequested = false
+
+    var showsLaunchScreen: Bool {
+        if case .workspace = screen { return false }
+        return true
+    }
 
     var page: URL? {
         if case .resource(let address) = screen { return address }
@@ -31,12 +34,6 @@ final class OrganizerStartup: ObservableObject {
     }
 
     func enterForeground() {
-        if !presentedInitialPage {
-            presentedInitialPage = true
-            if !workspaceRequested, !cache.hasQueuedNotice, let saved = cache.lastPage {
-                screen = .resource(saved)
-            }
-        }
         schedule.enterForeground()
         updateResources()
     }
@@ -87,16 +84,17 @@ final class OrganizerStartup: ObservableObject {
     }
 
     private func startDisplayTimeoutIfNeeded() {
-        guard cache.registrationToken == nil, page == nil, !hasOpenedWorkspace else { return }
+        guard cache.registrationToken == nil, showsLaunchScreen, page == nil else { return }
         launchDisplayTimeout = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(15))
             } catch {
                 return
             }
-            guard let self, self.cache.registrationToken == nil, self.page == nil else { return }
+            guard let self, self.cache.registrationToken == nil,
+                  self.showsLaunchScreen, self.page == nil else { return }
             Self.logger.notice("Still waiting for FCM registration; the resource request remains pending")
-            self.showWorkspace()
+            self.showFallback()
         }
     }
 
@@ -116,6 +114,10 @@ final class OrganizerStartup: ObservableObject {
             Self.logger.error("Resource request failed: \(String(describing: error), privacy: .private)")
         }
 
+        showFallback()
+    }
+
+    private func showFallback() {
         guard !workspaceRequested, page == nil else { return }
         if let saved = cache.lastPage {
             screen = .resource(saved)
@@ -125,7 +127,6 @@ final class OrganizerStartup: ObservableObject {
     }
 
     private func showWorkspace() {
-        hasOpenedWorkspace = true
         screen = .workspace
     }
 }

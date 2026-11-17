@@ -55,19 +55,16 @@ struct ContentView: View {
     }
 }
 struct LaunchScreen: View {
-    @State private var visible = false
     var body: some View {
         ZStack {
-            Color.ink.ignoresSafeArea()
-            VStack(spacing: 23) {
-                Emblem(size: 88).overlay(RoundedRectangle(cornerRadius: 25).stroke(Color.gold.opacity(0.35)))
-                Text("Vegas Rush").font(.system(size: 34, design: .serif)).multilineTextAlignment(.center).foregroundStyle(Color.paper)
-                Text("A LITTLE ORDER. MORE POSSIBILITY.").font(.system(size: 9, weight: .medium)).tracking(2.5).foregroundStyle(Color.gold)
-                ProgressView().tint(.gold).padding(.top, 30)
-            }.opacity(visible ? 1 : 0).offset(y: visible ? 0 : 12)
-        }.onAppear { withAnimation(.easeOut(duration: 0.6)) { visible = true } }
+            Color(uiColor: .systemBackground).ignoresSafeArea()
+            ProgressView()
+                .controlSize(.large)
+                .accessibilityLabel("Loading")
+        }
     }
 }
+
 struct OnboardingView: View {
     @EnvironmentObject var store: OrganizerStore
     var finish: () -> Void

@@ -11,7 +11,9 @@ struct OrganizerStartView: View {
 
     var body: some View {
         Group {
-            if showsOrganizer {
+            if startup.showsLaunchScreen {
+                LaunchScreen()
+            } else if showsOrganizer {
                 ContentView(store: store)
                     .safeAreaInset(edge: .top, spacing: 0) {
                         Button {
