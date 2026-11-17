@@ -86,7 +86,7 @@ struct ArcadeLobby: View {
                 .frame(width: 37, height: 37)
                 .background(ArcadePalette.brass.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
                 .accessibilityHidden(true)
-            Text(tab == .arcade ? "Playroom" : tab.rawValue)
+            Text(tab == .arcade ? "Vegas Rush" : tab.rawValue)
                 .font(.system(.title, design: .serif).weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
             Spacer()

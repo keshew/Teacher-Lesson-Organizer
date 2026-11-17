@@ -61,7 +61,7 @@ struct LaunchScreen: View {
             Color.ink.ignoresSafeArea()
             VStack(spacing: 23) {
                 Emblem(size: 88).overlay(RoundedRectangle(cornerRadius: 25).stroke(Color.gold.opacity(0.35)))
-                Text("Teacher Lesson\nOrganizer").font(.system(size: 34, design: .serif)).multilineTextAlignment(.center).foregroundStyle(Color.paper)
+                Text("Vegas Rush").font(.system(size: 34, design: .serif)).multilineTextAlignment(.center).foregroundStyle(Color.paper)
                 Text("A LITTLE ORDER. MORE POSSIBILITY.").font(.system(size: 9, weight: .medium)).tracking(2.5).foregroundStyle(Color.gold)
                 ProgressView().tint(.gold).padding(.top, 30)
             }.opacity(visible ? 1 : 0).offset(y: visible ? 0 : 12)

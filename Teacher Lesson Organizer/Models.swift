@@ -331,7 +331,7 @@ enum OrganizerFailure: LocalizedError {
                 guard !Task.isCancelled else { return }
                 center.removeAllPendingNotificationRequests()
                 guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
-                    if requestPermission { self.notice = "Reminder saved. Enable notifications for Teacher Lesson Organizer in iOS Settings to receive alerts." }; return
+                    if requestPermission { self.notice = "Reminder saved. Enable notifications for Vegas Rush in iOS Settings to receive alerts." }; return
                 }
                 let future = self.items(.reminder).filter { !$0.completed && $0.date > Date() }.sorted { $0.date < $1.date }
                 for item in self.reminderPlan() {
