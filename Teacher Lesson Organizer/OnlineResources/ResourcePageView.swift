@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 @preconcurrency import WebKit
 
@@ -18,14 +19,13 @@ struct ResourcePageView: UIViewControllerRepresentable {
 }
 
 final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUIDelegate {
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ResourcePages", category: "WebNavigation")
     private lazy var reader: WKWebView = {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         return makePage(configuration)
     }()
-    private var tabs: [ResourceTab] = []
+    private var tabs: [WKWebView] = []
     var didLoad: ((URL) -> Void)?
     private var initialNavigation: WKNavigation?
     private var loadedAddress: URL?
@@ -56,12 +56,30 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         initialNavigation = reader.load(URLRequest(url: destination))
     }
 
-    func webView(_ surface: WKWebView, didFinish navigation: WKNavigation!) {
-        guard surface === reader else { return }
+    func webView(_ surface: WKWebView, didCommit navigation: WKNavigation!) {
+        if tabs.contains(surface) {
+            // The initial empty document must not cover the opener for an HTTP request.
+            if let url = surface.url, url.absoluteString != "about:blank" {
+                surface.isHidden = false
+            }
+            logger.info("New window committed a document")
+        }
+        guard surface === reader, let navigation, navigation === initialNavigation, let loadedAddress else { return }
         retryTask?.cancel()
-        guard let navigation, navigation === initialNavigation, let loadedAddress else { return }
         initialNavigation = nil
         didLoad?(loadedAddress)
+    }
+
+    func webView(
+        _ surface: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if tabs.contains(surface), navigationResponse.isForMainFrame,
+           let response = navigationResponse.response as? HTTPURLResponse {
+            logger.info("New window received HTTP \(response.statusCode, privacy: .public)")
+        }
+        decisionHandler(.allow)
     }
 
     func webView(
@@ -89,12 +107,13 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         }
         // WebKit loads the request into this view and keeps the opener relationship.
         let page = makePage(configuration)
-        let tab = ResourceTab(page: page)
-        tab.onClose = { [weak self, weak page] in
-            if let page { self?.closeTab(for: page) }
-        }
-        mount(tab, guide: view.safeAreaLayoutGuide)
-        tabs.append(tab)
+        page.customUserAgent = surface.customUserAgent
+        let scheme = navigationAction.request.url?.scheme?.lowercased() ?? "none"
+        // Empty windows can be filled directly by the opener, without an HTTP response.
+        page.isHidden = scheme == "http" || scheme == "https"
+        mount(page, guide: view.safeAreaLayoutGuide)
+        tabs.append(page)
+        logger.info("Created new window for URL scheme \(scheme, privacy: .public)")
         return page
     }
 
@@ -113,10 +132,10 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     private func closeTab(for surface: WKWebView) {
-        guard let index = tabs.firstIndex(where: { $0.page === surface }) else { return }
-        let tab = tabs.remove(at: index)
-        tab.removeFromSuperview()
+        guard let index = tabs.firstIndex(where: { $0 === surface }) else { return }
+        tabs.remove(at: index)
         surface.stopLoading()
+        surface.removeFromSuperview()
     }
 
     func webViewWebContentProcessDidTerminate(_ surface: WKWebView) {
@@ -129,14 +148,28 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     func webView(_ surface: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        handlePopupFailure(error, in: surface)
         recover(surface, from: error, navigation: navigation)
     }
 
     func webView(_ surface: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        handlePopupFailure(error, in: surface)
         recover(surface, from: error, navigation: navigation)
     }
 
+    private func handlePopupFailure(_ error: Error, in surface: WKWebView) {
+        guard tabs.contains(surface) else { return }
+        let failure = error as NSError
+        guard failure.domain != NSURLErrorDomain || failure.code != NSURLErrorCancelled else { return }
+        logger.error("New window navigation failed: \(failure.domain, privacy: .public) \(failure.code, privacy: .public)")
+        if surface.isHidden {
+            closeTab(for: surface)
+        }
+    }
+
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         let page = WKWebView(frame: .zero, configuration: configuration)
         page.customUserAgent = ResourceDirectory.pageAgent
         page.navigationDelegate = self
@@ -197,45 +230,4 @@ final class ResourcePageController: UIViewController, WKNavigationDelegate, WKUI
         }
     }
 
-}
-
-
-private final class ResourceTab: UIView {
-    let page: WKWebView
-    var onClose: (() -> Void)?
-
-    init(page: WKWebView) {
-        self.page = page
-        super.init(frame: .zero)
-        backgroundColor = .systemBackground
-
-        let close = UIButton(type: .close)
-        close.accessibilityLabel = "Close tab"
-        close.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
-
-        let toolbar = UIView()
-        toolbar.backgroundColor = .secondarySystemBackground
-        addSubview(toolbar)
-        toolbar.addSubview(close)
-        addSubview(page)
-
-        for child in [toolbar, close, page] {
-            child.translatesAutoresizingMaskIntoConstraints = false
-        }
-        NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: topAnchor),
-            toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 44),
-            close.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            close.trailingAnchor.constraint(equalTo: toolbar.layoutMarginsGuide.trailingAnchor),
-            page.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            page.leadingAnchor.constraint(equalTo: leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: trailingAnchor),
-            page.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
 }

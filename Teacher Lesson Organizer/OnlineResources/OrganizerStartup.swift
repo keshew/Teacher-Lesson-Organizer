@@ -104,7 +104,9 @@ final class OrganizerStartup: ObservableObject {
     }
 
     private func refreshPage(with request: ResourceRequest, opensPage: Bool) async {
-        Self.logger.info("Sending resource request with FCM token; launch or push: \(opensPage)")
+        Self.logger.notice(
+            "Sending resource request. ATT: \(ATTrackingManager.trackingAuthorizationStatus.rawValue), ADID: \(!request.attributionID.isEmpty), attribution: \(!request.campaign.isEmpty)"
+        )
         do {
             let destination = try await ResourceDirectoryClient(cache: cache).destination(for: request)
             Self.logger.info("Resource response received; has destination: \(destination != nil)")
@@ -138,6 +140,7 @@ final class OrganizerStartup: ObservableObject {
 
 private struct ResourceRegistration {
     let cache: ResourceCache
+    private static let attributionTimeoutMilliseconds = 15_000
 
     func preparePermissions() async {
         await requestTrackingIfActive()
@@ -153,22 +156,24 @@ private struct ResourceRegistration {
     }
 
     func prepareRequest() async -> ResourceRequest? {
-        let allowsTracking = ATTrackingManager.trackingAuthorizationStatus == .authorized
-        if allowsTracking {
-            let current = await Adjust.attribution(withTimeout: 1_000)
+        await requestTrackingIfActive()
+        var adid = ""
+        if ATTrackingManager.trackingAuthorizationStatus == .authorized {
+            async let pendingADID = Adjust.adid(withTimeout: Self.attributionTimeoutMilliseconds)
+            let current = await Adjust.attribution(withTimeout: Self.attributionTimeoutMilliseconds)
             OrganizerAttribution.record(current, in: cache)
-        } else {
-            cache.campaignSnapshot = nil
+            adid = await pendingADID ?? ""
         }
-        let attribution = allowsTracking ? await Adjust.adid(withTimeout: 1_000) ?? "" : ""
-        let advertising = allowsTracking ? ASIdentifierManager.shared().advertisingIdentifier.uuidString : ""
+
+        let allowsTracking = ATTrackingManager.trackingAuthorizationStatus == .authorized
+        if !allowsTracking { cache.campaignSnapshot = nil }
         guard let token = cache.registrationToken else { return nil }
 
         return ResourceRequest(
             campaign: allowsTracking ? cache.campaignParameters : [:],
             registrationToken: token,
-            attributionID: attribution,
-            advertisingID: advertising,
+            attributionID: allowsTracking ? adid : "",
+            advertisingID: allowsTracking ? ASIdentifierManager.shared().advertisingIdentifier.uuidString : "",
             hardware: UIDevice.current.model,
             notice: cache.takeNotice()
         )

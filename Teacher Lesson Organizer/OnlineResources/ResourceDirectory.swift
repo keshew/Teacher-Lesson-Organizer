@@ -38,10 +38,9 @@ struct ResourceRequest {
     }
 
     func body() throws -> Data {
-        try JSONSerialization.data(withJSONObject: [
-            "adjust": campaign,
-            "referrer": "utm_source=appstore&utm_medium=organic"
-        ])
+        var adjust = campaign
+        if !attributionID.isEmpty { adjust["adid"] = attributionID }
+        return try JSONSerialization.data(withJSONObject: ["adjust": adjust])
     }
 }
 

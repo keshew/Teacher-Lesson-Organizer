@@ -74,7 +74,9 @@ final class ResourceCache {
             "jsonResponse": snapshot
         ]
         for (field, rawKey) in fields {
-            campaign[field] = values[rawKey] as? String ?? values[field] as? String ?? ""
+            let value = values[rawKey] as? String ?? values[field] as? String ?? ""
+            campaign[field] = value
+            if !value.isEmpty, rawKey != field { campaign[rawKey] = value }
         }
         return campaign
     }

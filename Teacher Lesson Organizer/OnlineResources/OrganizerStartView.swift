@@ -62,21 +62,6 @@ struct OrganizerStartView: View {
         }
         .fullScreenCover(isPresented: Binding(get: { startup.page != nil && selectedGame == nil }, set: { _ in }), onDismiss: { loadedPage = nil }) {
             ResourcePageView(address: startup.page, didLoad: { loadedPage = $0 })
-                .ignoresSafeArea()
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    if webContentIsReady {
-                        Button {
-                            startup.openWorkspace()
-                            showsOrganizer = false
-                        } label: {
-                            Label("Games", systemImage: "chevron.left")
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 20)
-                        }
-                        .buttonStyle(.plain)
-                        .background(.regularMaterial)
-                    }
-                }
                 .accessibilityHidden(!webContentIsReady)
                 .overlay {
                     if !webContentIsReady {
